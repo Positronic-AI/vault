@@ -49,13 +49,15 @@ class SecurityService {
   }
 
   // Check if device is rooted/jailbroken
-  // TODO: Implement proper root detection
+  // Uses basic file existence checks for common root indicators
   Future<bool> isDeviceCompromised() async {
     try {
-      // Basic check for common root files (not comprehensive)
       if (Platform.isAndroid) {
-        final suBinaryPaths = [
+        // Check for common root management apps and binaries
+        final rootIndicators = [
           '/system/app/Superuser.apk',
+          '/system/app/SuperSU.apk',
+          '/system/app/Magisk.apk',
           '/sbin/su',
           '/system/bin/su',
           '/system/xbin/su',
@@ -64,11 +66,17 @@ class SecurityService {
           '/system/sd/xbin/su',
           '/system/bin/failsafe/su',
           '/data/local/su',
+          '/su/bin/su',
         ];
 
-        for (final path in suBinaryPaths) {
-          if (await File(path).exists()) {
-            return true;
+        for (final path in rootIndicators) {
+          try {
+            if (await File(path).exists()) {
+              return true;
+            }
+          } catch (e) {
+            // Permission denied or other errors - continue checking
+            continue;
           }
         }
       }
@@ -79,11 +87,21 @@ class SecurityService {
     }
   }
 
-  // Check if running in developer mode
-  // TODO: Implement proper developer mode detection
+  // Check if running in developer mode (USB debugging enabled)
   Future<bool> isDeveloperMode() async {
-    // For now, return false as this requires more complex detection
-    return false;
+    if (!Platform.isAndroid) {
+      return false;
+    }
+
+    try {
+      const platform = MethodChannel('com.vault/security');
+      final bool? devModeEnabled =
+          await platform.invokeMethod('isDeveloperModeEnabled');
+      return devModeEnabled ?? false;
+    } catch (e) {
+      debugPrint('Error checking developer mode: $e');
+      return false;
+    }
   }
 
   // Get app version info

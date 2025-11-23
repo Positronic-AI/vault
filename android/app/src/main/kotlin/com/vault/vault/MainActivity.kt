@@ -2,6 +2,7 @@ package com.vault.vault
 
 import android.content.pm.PackageManager
 import android.os.Build
+import android.provider.Settings
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -29,6 +30,14 @@ class MainActivity: FlutterFragmentActivity() {
                         result.success(fingerprint)
                     } catch (e: Exception) {
                         result.error("ERROR", "Failed to get certificate fingerprint", e.message)
+                    }
+                }
+                "isDeveloperModeEnabled" -> {
+                    try {
+                        val isDeveloperMode = isDeveloperModeEnabled()
+                        result.success(isDeveloperMode)
+                    } catch (e: Exception) {
+                        result.error("ERROR", "Failed to check developer mode", e.message)
                     }
                 }
                 else -> {
@@ -68,5 +77,21 @@ class MainActivity: FlutterFragmentActivity() {
         val digest = md.digest(cert)
 
         return digest.joinToString(":") { "%02X".format(it) }
+    }
+
+    private fun isDeveloperModeEnabled(): Boolean {
+        return try {
+            Settings.Secure.getInt(
+                contentResolver,
+                Settings.Global.DEVELOPMENT_SETTINGS_ENABLED,
+                0
+            ) != 0 || Settings.Secure.getInt(
+                contentResolver,
+                Settings.Global.ADB_ENABLED,
+                0
+            ) != 0
+        } catch (e: Exception) {
+            false
+        }
     }
 }
