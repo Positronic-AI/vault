@@ -15,12 +15,19 @@ If the fingerprints match, you can be confident the app is authentic and hasn't 
 
 ### Official Release Certificate Fingerprints
 
-#### Current Release (Debug - Development Only)
+#### Production Release (v1.0.0+22 and later)
+```
+SHA-256: D6:A1:24:D1:3B:E7:1D:D0:22:7D:65:37:7A:3F:CD:DC:25:71:4B:9A:78:B5:A4:F6:AA:3C:12:D7:87:A6:ED:3A
+```
+
+**Note:** Apps downloaded from Google Play Store will be signed with this certificate.
+
+#### Debug Build (Development Only)
 ```
 SHA-256: 4B:28:CF:1D:05:7D:4F:E8:02:E3:49:1C:97:C2:19:B9:FA:3E:DC:D2:1D:48:98:A8:A8:81:AC:9F:8F:88:BB:62
 ```
 
-**Note:** This is the debug signing certificate. Production releases will use a separate release certificate that will be published here before the first release.
+**Note:** This is the debug signing certificate used only for development builds. Do not use this for verification of downloaded apps.
 
 ## Security Features
 
