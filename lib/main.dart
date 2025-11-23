@@ -42,15 +42,36 @@ class AuthGate extends StatefulWidget {
   State<AuthGate> createState() => _AuthGateState();
 }
 
-class _AuthGateState extends State<AuthGate> {
+class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
   final AuthService _authService = AuthService();
   bool _isLoading = true;
   bool _hasPassword = false;
+  bool _isAuthenticated = false;
+  bool _requiresAuth = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _checkAuthStatus();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      // App went to background or screen locked
+      if (_isAuthenticated) {
+        setState(() {
+          _requiresAuth = true;
+        });
+      }
+    }
   }
 
   Future<void> _checkAuthStatus() async {
@@ -58,6 +79,13 @@ class _AuthGateState extends State<AuthGate> {
     setState(() {
       _hasPassword = hasPassword;
       _isLoading = false;
+    });
+  }
+
+  void _onAuthenticated() {
+    setState(() {
+      _isAuthenticated = true;
+      _requiresAuth = false;
     });
   }
 
@@ -71,13 +99,15 @@ class _AuthGateState extends State<AuthGate> {
       );
     }
 
-    return AuthScreen(
-      isFirstTime: !_hasPassword,
-      onAuthenticated: () {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const HomeScreen()),
-        );
-      },
-    );
+    // Show auth screen if not authenticated or requires re-auth
+    if (!_isAuthenticated || _requiresAuth) {
+      return AuthScreen(
+        isFirstTime: !_hasPassword,
+        onAuthenticated: _onAuthenticated,
+      );
+    }
+
+    // Show home screen when authenticated
+    return const HomeScreen();
   }
 }

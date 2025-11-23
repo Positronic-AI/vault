@@ -157,10 +157,13 @@ class _AuthScreenState extends State<AuthScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 // Logo/Icon
-                Icon(
-                  Icons.lock,
-                  size: 80,
-                  color: Theme.of(context).colorScheme.primary,
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(24),
+                  child: Image.asset(
+                    'assets/icon.png',
+                    width: 120,
+                    height: 120,
+                  ),
                 ),
                 const SizedBox(height: 24),
 

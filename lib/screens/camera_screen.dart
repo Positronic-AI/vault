@@ -24,6 +24,7 @@ class _CameraScreenState extends State<CameraScreen>
   bool _isRecording = false;
   bool _isFrontCamera = false;
   bool _isVideoMode = false; // false = photo mode, true = video mode
+  bool _showFlash = false;
   final StorageService _storageService = StorageService();
 
   StreamSubscription<AccelerometerEvent>? _accelerometerSubscription;
@@ -84,11 +85,7 @@ class _CameraScreenState extends State<CameraScreen>
   }
 
   double _getPreviewRotation() {
-    // The camera preview appears upside down in landscape mode
-    // Apply 180° rotation correction for landscape orientations
-    if (_deviceOrientation == 90 || _deviceOrientation == 270) {
-      return 180.0;
-    }
+    // No rotation needed - camera handles orientation internally
     return 0.0;
   }
 
@@ -136,6 +133,20 @@ class _CameraScreenState extends State<CameraScreen>
     if (_controller == null || !_controller!.value.isInitialized) {
       return;
     }
+
+    // Show flash immediately for visual feedback
+    setState(() {
+      _showFlash = true;
+    });
+
+    // Hide flash after brief delay
+    Future.delayed(const Duration(milliseconds: 150), () {
+      if (mounted) {
+        setState(() {
+          _showFlash = false;
+        });
+      }
+    });
 
     try {
       final tempDir = await getTemporaryDirectory();
@@ -278,6 +289,14 @@ class _CameraScreenState extends State<CameraScreen>
                     child: CameraPreview(_controller!),
                   ),
                 ),
+
+                // Flash overlay
+                if (_showFlash)
+                  Positioned.fill(
+                    child: Container(
+                      color: Colors.white.withOpacity(0.6),
+                    ),
+                  ),
 
                 // Recording indicator
                 if (_isVideoMode && _isRecording)

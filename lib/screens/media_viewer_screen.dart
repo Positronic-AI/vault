@@ -8,7 +8,7 @@ import '../models/media_item.dart';
 class MediaViewerScreen extends StatefulWidget {
   final List<MediaItem> allMedia;
   final int initialIndex;
-  final Function(MediaItem) onDelete;
+  final Future<void> Function(MediaItem) onDelete;
 
   const MediaViewerScreen({
     super.key,
@@ -40,8 +40,10 @@ class _MediaViewerScreenState extends State<MediaViewerScreen> {
 
   Future<void> _handleDelete() async {
     final item = widget.allMedia[_currentIndex];
-    widget.onDelete(item);
-    Navigator.pop(context);
+    await widget.onDelete(item);
+    if (mounted) {
+      Navigator.pop(context);
+    }
   }
 
   @override
@@ -174,7 +176,11 @@ class _MediaPageState extends State<MediaPage> with AutomaticKeepAliveClientMixi
             ? const Center(child: Text('Error loading media', style: TextStyle(color: Colors.white)))
             : Center(
                 child: widget.mediaItem.type == MediaType.photo
-                    ? Image.file(_decryptedFile!)
+                    ? InteractiveViewer(
+                        minScale: 1.0,
+                        maxScale: 4.0,
+                        child: Image.file(_decryptedFile!),
+                      )
                     : _videoController != null && _videoController!.value.isInitialized
                         ? GestureDetector(
                             onTap: () {
