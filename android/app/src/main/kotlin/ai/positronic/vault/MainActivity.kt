@@ -1,4 +1,4 @@
-package com.vault.vault
+package ai.positronic.vault
 
 import android.content.pm.PackageManager
 import android.os.Build
@@ -9,7 +9,7 @@ import io.flutter.plugin.common.MethodChannel
 import java.security.MessageDigest
 
 class MainActivity: FlutterFragmentActivity() {
-    private val CHANNEL = "com.vault/security"
+    private val CHANNEL = "ai.positronic.vault/security"
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)

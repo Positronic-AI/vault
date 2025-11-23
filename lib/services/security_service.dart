@@ -13,7 +13,7 @@ class SecurityService {
 
     try {
       // Use platform channel to get APK path and compute hash
-      const platform = MethodChannel('com.vault/security');
+      const platform = MethodChannel('ai.positronic.vault/security');
       final String? apkPath = await platform.invokeMethod('getApkPath');
 
       if (apkPath != null) {
@@ -38,7 +38,7 @@ class SecurityService {
     }
 
     try {
-      const platform = MethodChannel('com.vault/security');
+      const platform = MethodChannel('ai.positronic.vault/security');
       final String? fingerprint =
           await platform.invokeMethod('getCertificateFingerprint');
       return fingerprint;
@@ -94,7 +94,7 @@ class SecurityService {
     }
 
     try {
-      const platform = MethodChannel('com.vault/security');
+      const platform = MethodChannel('ai.positronic.vault/security');
       final bool? devModeEnabled =
           await platform.invokeMethod('isDeveloperModeEnabled');
       return devModeEnabled ?? false;
