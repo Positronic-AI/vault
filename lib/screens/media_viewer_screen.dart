@@ -24,12 +24,15 @@ class MediaViewerScreen extends StatefulWidget {
 class _MediaViewerScreenState extends State<MediaViewerScreen> {
   late PageController _pageController;
   late int _currentIndex;
+  final StorageService _storageService = StorageService();
+  bool _isExporting = false;
 
   @override
   void initState() {
     super.initState();
     _currentIndex = widget.initialIndex;
     _pageController = PageController(initialPage: widget.initialIndex);
+    _storageService.initialize();
   }
 
   @override
@@ -46,6 +49,64 @@ class _MediaViewerScreenState extends State<MediaViewerScreen> {
     }
   }
 
+  Future<void> _handleExport() async {
+    final item = widget.allMedia[_currentIndex];
+    final typeLabel = item.type == MediaType.photo ? 'photo' : 'video';
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Export file?'),
+        content: Text('This will decrypt and save the $typeLabel to your Downloads folder.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Export'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    setState(() {
+      _isExporting = true;
+    });
+
+    try {
+      final exportDir = await _storageService.getExportDirectory();
+      final exportedFile = await _storageService.exportFile(
+        item: item,
+        exportPath: exportDir.path,
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Exported to ${exportedFile.path}'),
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Export failed: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isExporting = false;
+        });
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -55,8 +116,23 @@ class _MediaViewerScreenState extends State<MediaViewerScreen> {
         title: Text('${_currentIndex + 1} / ${widget.allMedia.length}'),
         actions: [
           IconButton(
+            icon: _isExporting
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.file_download),
+            onPressed: _isExporting ? null : _handleExport,
+            tooltip: 'Export to Downloads',
+          ),
+          IconButton(
             icon: const Icon(Icons.delete),
             onPressed: _handleDelete,
+            tooltip: 'Delete',
           ),
         ],
       ),

@@ -52,8 +52,9 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
   bool _isAuthenticated = false;
   bool _requiresAuth = false;
 
-  // Key increments on lock to force Navigator reset, clearing any open screens
-  int _navKey = 0;
+  // Navigator key for accessing state to handle back button
+  // Recreated on lock to reset navigation stack
+  GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
 
   // Privacy screen shown immediately when app goes to background
   bool _showPrivacyScreen = false;
@@ -87,7 +88,8 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
       if (_isAuthenticated && !suppressAutoLock) {
         setState(() {
           _requiresAuth = true;
-          _navKey++; // Force Navigator reset to clear any open media viewers
+          // Create new navigator key to reset stack on re-auth
+          _navigatorKey = GlobalKey<NavigatorState>();
         });
       }
     }
@@ -142,11 +144,20 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
     }
 
     // Show home screen when authenticated
-    // Use Navigator with key to ensure route stack resets on lock
-    return Navigator(
-      key: ValueKey(_navKey),
-      onGenerateRoute: (_) => MaterialPageRoute(
-        builder: (_) => const HomeScreen(),
+    // PopScope intercepts back button; we use maybePop to respect inner PopScopes
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop && _navigatorKey.currentState?.canPop() == true) {
+          // Use maybePop to respect inner PopScope handlers (e.g., unsaved changes dialog)
+          _navigatorKey.currentState?.maybePop();
+        }
+      },
+      child: Navigator(
+        key: _navigatorKey,
+        onGenerateRoute: (_) => MaterialPageRoute(
+          builder: (_) => const HomeScreen(),
+        ),
       ),
     );
   }

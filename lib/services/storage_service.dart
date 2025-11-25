@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:path_provider/path_provider.dart';
@@ -49,7 +50,7 @@ class StorageService {
 
     _database = await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE media (
@@ -57,9 +58,15 @@ class StorageService {
             type TEXT NOT NULL,
             filename TEXT NOT NULL,
             thumbnail_path TEXT,
+            original_name TEXT,
             created_at INTEGER NOT NULL
           )
         ''');
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await db.execute('ALTER TABLE media ADD COLUMN original_name TEXT');
+        }
       },
     );
   }
@@ -161,6 +168,162 @@ class StorageService {
   Future<int> getMediaCount() async {
     final result = await _database!.rawQuery('SELECT COUNT(*) FROM media');
     return Sqflite.firstIntValue(result) ?? 0;
+  }
+
+  // Save note (encrypted)
+  Future<MediaItem> saveNote(String content) async {
+    final vaultDir = await _getVaultDirectory();
+    final id = DateTime.now().millisecondsSinceEpoch.toString();
+    final filename = '$id.md.enc';
+    final encryptedPath = '${vaultDir.path}/$filename';
+
+    // Convert text to bytes
+    final bytes = utf8.encode(content);
+
+    // Encrypt
+    final encrypter = encrypt_lib.Encrypter(
+      encrypt_lib.AES(_encryptionKey!),
+    );
+    final encrypted = encrypter.encryptBytes(bytes, iv: _iv!);
+
+    // Save encrypted file
+    await File(encryptedPath).writeAsBytes(encrypted.bytes);
+
+    // Save to database
+    final mediaItem = MediaItem(
+      id: id,
+      type: MediaType.note,
+      filename: filename,
+      createdAt: DateTime.now(),
+    );
+
+    await _database!.insert('media', mediaItem.toMap());
+
+    return mediaItem;
+  }
+
+  // Get decrypted note content
+  Future<String> getNoteContent(MediaItem item) async {
+    final bytes = await getMediaBytes(item);
+    return utf8.decode(bytes);
+  }
+
+  // Update existing note
+  Future<void> updateNote(MediaItem item, String content) async {
+    final vaultDir = await _getVaultDirectory();
+    final encryptedPath = '${vaultDir.path}/${item.filename}';
+
+    // Convert text to bytes
+    final bytes = utf8.encode(content);
+
+    // Encrypt
+    final encrypter = encrypt_lib.Encrypter(
+      encrypt_lib.AES(_encryptionKey!),
+    );
+    final encrypted = encrypter.encryptBytes(bytes, iv: _iv!);
+
+    // Overwrite encrypted file
+    await File(encryptedPath).writeAsBytes(encrypted.bytes);
+  }
+
+  // Import file (encrypted)
+  Future<MediaItem> importFile({
+    required File file,
+    required String originalName,
+    bool deleteOriginal = false,
+  }) async {
+    final vaultDir = await _getVaultDirectory();
+    final id = DateTime.now().millisecondsSinceEpoch.toString();
+
+    // Get file extension from original name
+    final ext = originalName.contains('.')
+        ? originalName.split('.').last.toLowerCase()
+        : 'bin';
+    final filename = '$id.$ext.enc';
+    final encryptedPath = '${vaultDir.path}/$filename';
+
+    // Read file
+    final bytes = await file.readAsBytes();
+
+    // Encrypt
+    final encrypter = encrypt_lib.Encrypter(
+      encrypt_lib.AES(_encryptionKey!),
+    );
+    final encrypted = encrypter.encryptBytes(bytes, iv: _iv!);
+
+    // Save encrypted file
+    await File(encryptedPath).writeAsBytes(encrypted.bytes);
+
+    // Delete original if requested (move mode)
+    if (deleteOriginal) {
+      try {
+        await file.delete();
+      } catch (e) {
+        // Ignore deletion errors (might be permission issues)
+      }
+    }
+
+    // Save to database
+    final mediaItem = MediaItem(
+      id: id,
+      type: MediaType.file,
+      filename: filename,
+      originalName: originalName,
+      createdAt: DateTime.now(),
+    );
+
+    await _database!.insert('media', mediaItem.toMap());
+
+    return mediaItem;
+  }
+
+  // Export file (decrypt and save to specified location)
+  Future<File> exportFile({
+    required MediaItem item,
+    required String exportPath,
+  }) async {
+    // Get decrypted bytes
+    final bytes = await getMediaBytes(item);
+
+    // Determine filename based on type
+    String exportName;
+    if (item.originalName != null) {
+      exportName = item.originalName!;
+    } else {
+      // Generate filename based on media type
+      switch (item.type) {
+        case MediaType.photo:
+          exportName = 'vault_photo_${item.id}.jpg';
+          break;
+        case MediaType.video:
+          exportName = 'vault_video_${item.id}.mp4';
+          break;
+        case MediaType.note:
+          exportName = 'vault_note_${item.id}.md';
+          break;
+        case MediaType.file:
+          exportName = 'exported_${item.id}';
+          break;
+      }
+    }
+    final fullPath = '$exportPath/$exportName';
+
+    // Write to export location
+    final exportFile = File(fullPath);
+    await exportFile.writeAsBytes(bytes);
+
+    return exportFile;
+  }
+
+  // Get export directory (Downloads folder)
+  Future<Directory> getExportDirectory() async {
+    // On Android, use external storage Downloads folder
+    final dir = Directory('/storage/emulated/0/Download');
+    if (await dir.exists()) {
+      return dir;
+    }
+    // Fallback to app documents directory
+    return await getApplicationDocumentsDirectory();
   }
 
   // Close database

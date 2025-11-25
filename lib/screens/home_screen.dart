@@ -4,6 +4,9 @@ import 'gallery_screen.dart';
 import 'settings_screen.dart';
 import '../main.dart';
 
+/// Persists selected tab index across Navigator rebuilds
+int _persistedTabIndex = 0;
+
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -12,7 +15,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  int _selectedIndex = 0;
+  int _selectedIndex = _persistedTabIndex;
 
   final List<Widget> _screens = const [
     GalleryScreen(),
@@ -21,6 +24,7 @@ class _HomeScreenState extends State<HomeScreen> {
   ];
 
   void _handleLockApp() {
+    _persistedTabIndex = 0; // Reset to gallery on lock
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => const AuthGate()),
       (route) => false,
@@ -29,42 +33,46 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: _screens[_selectedIndex == 3 ? 2 : _selectedIndex],
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _selectedIndex,
-        onDestinationSelected: (index) {
-          if (index == 2) {
-            // Lock button pressed - don't change selection, just lock
-            _handleLockApp();
-          } else {
-            setState(() {
-              _selectedIndex = index;
-            });
-          }
-        },
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.photo_library_outlined),
-            selectedIcon: Icon(Icons.photo_library),
-            label: 'Gallery',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.camera_alt_outlined),
-            selectedIcon: Icon(Icons.camera_alt),
-            label: 'Camera',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.lock_outline),
-            selectedIcon: Icon(Icons.lock),
-            label: 'Lock',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.info_outline),
-            selectedIcon: Icon(Icons.info),
-            label: 'About',
-          ),
-        ],
+    return PopScope(
+      canPop: false,
+      child: Scaffold(
+        body: _screens[_selectedIndex == 3 ? 2 : _selectedIndex],
+        bottomNavigationBar: NavigationBar(
+          selectedIndex: _selectedIndex,
+          onDestinationSelected: (index) {
+            if (index == 2) {
+              // Lock button pressed - don't change selection, just lock
+              _handleLockApp();
+            } else {
+              setState(() {
+                _selectedIndex = index;
+                _persistedTabIndex = index;
+              });
+            }
+          },
+          destinations: const [
+            NavigationDestination(
+              icon: Icon(Icons.photo_library_outlined),
+              selectedIcon: Icon(Icons.photo_library),
+              label: 'Gallery',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.camera_alt_outlined),
+              selectedIcon: Icon(Icons.camera_alt),
+              label: 'Camera',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.lock_outline),
+              selectedIcon: Icon(Icons.lock),
+              label: 'Lock',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.info_outline),
+              selectedIcon: Icon(Icons.info),
+              label: 'About',
+            ),
+          ],
+        ),
       ),
     );
   }
