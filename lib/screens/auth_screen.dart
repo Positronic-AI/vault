@@ -48,12 +48,6 @@ class _AuthScreenState extends State<AuthScreen> {
     setState(() {
       _isBiometricAvailable = isAvailable;
     });
-
-    // If biometric is available and not first time, try biometric auth automatically
-    // Don't show error if auto-attempt fails (user might have just canceled)
-    if (isAvailable && !widget.isFirstTime) {
-      _authenticateWithBiometric(showError: false);
-    }
   }
 
   Future<void> _authenticateWithBiometric({bool showError = true}) async {

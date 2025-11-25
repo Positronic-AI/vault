@@ -30,18 +30,13 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: _screens[_selectedIndex],
+      body: _screens[_selectedIndex == 3 ? 2 : _selectedIndex],
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex,
         onDestinationSelected: (index) {
           if (index == 2) {
-            // Lock button pressed (now 3rd position, index 2)
+            // Lock button pressed - don't change selection, just lock
             _handleLockApp();
-          } else if (index == 3) {
-            // About button pressed (4th position, index 3) - maps to screen index 2
-            setState(() {
-              _selectedIndex = 2;
-            });
           } else {
             setState(() {
               _selectedIndex = index;

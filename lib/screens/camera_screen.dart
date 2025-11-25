@@ -8,6 +8,7 @@ import 'package:path/path.dart' as path;
 import 'package:sensors_plus/sensors_plus.dart';
 import '../services/storage_service.dart';
 import '../models/media_item.dart';
+import '../main.dart';
 
 class CameraScreen extends StatefulWidget {
   const CameraScreen({super.key});
@@ -91,7 +92,10 @@ class _CameraScreenState extends State<CameraScreen>
 
   Future<void> _initializeCamera() async {
     try {
+      // Suppress auto-lock during permission request
+      suppressAutoLock = true;
       _cameras = await availableCameras();
+      suppressAutoLock = false;
 
       if (_cameras!.isEmpty) {
         return;
@@ -99,6 +103,7 @@ class _CameraScreenState extends State<CameraScreen>
 
       await _setupCamera(_isFrontCamera ? 1 : 0);
     } catch (e) {
+      suppressAutoLock = false;
       debugPrint('Error initializing camera: $e');
     }
   }

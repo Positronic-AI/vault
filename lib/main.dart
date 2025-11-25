@@ -4,6 +4,9 @@ import 'screens/auth_screen.dart';
 import 'screens/home_screen.dart';
 import 'services/auth_service.dart';
 
+/// Global flag to suppress auto-lock during permission requests
+bool suppressAutoLock = false;
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -49,6 +52,12 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
   bool _isAuthenticated = false;
   bool _requiresAuth = false;
 
+  // Key increments on lock to force Navigator reset, clearing any open screens
+  int _navKey = 0;
+
+  // Privacy screen shown immediately when app goes to background
+  bool _showPrivacyScreen = false;
+
   @override
   void initState() {
     super.initState();
@@ -64,13 +73,29 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
-      // App went to background or screen locked
-      if (_isAuthenticated) {
+    if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
+      // Show privacy screen immediately to hide content
+      // Don't trigger if already requiring auth (user is on auth screen)
+      if (_isAuthenticated && !_requiresAuth && !suppressAutoLock) {
         setState(() {
-          _requiresAuth = true;
+          _showPrivacyScreen = true;
         });
       }
+    }
+    if (state == AppLifecycleState.paused) {
+      // App went to background - require re-auth unless suppressed
+      if (_isAuthenticated && !suppressAutoLock) {
+        setState(() {
+          _requiresAuth = true;
+          _navKey++; // Force Navigator reset to clear any open media viewers
+        });
+      }
+    }
+    if (state == AppLifecycleState.resumed) {
+      // Clear privacy screen (auth screen will show if needed)
+      setState(() {
+        _showPrivacyScreen = false;
+      });
     }
   }
 
@@ -91,6 +116,15 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    // Privacy screen covers everything immediately when app goes to background
+    if (_showPrivacyScreen) {
+      return const Scaffold(
+        body: Center(
+          child: Icon(Icons.lock, size: 64),
+        ),
+      );
+    }
+
     if (_isLoading) {
       return const Scaffold(
         body: Center(
@@ -108,6 +142,12 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
     }
 
     // Show home screen when authenticated
-    return const HomeScreen();
+    // Use Navigator with key to ensure route stack resets on lock
+    return Navigator(
+      key: ValueKey(_navKey),
+      onGenerateRoute: (_) => MaterialPageRoute(
+        builder: (_) => const HomeScreen(),
+      ),
+    );
   }
 }
