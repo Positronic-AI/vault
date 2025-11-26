@@ -1,11 +1,14 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import 'package:encrypt/encrypt.dart' as encrypt_lib;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:image/image.dart' as img;
+import 'package:video_thumbnail/video_thumbnail.dart';
 import '../models/media_item.dart';
 
 class StorageService {
@@ -106,6 +109,18 @@ class StorageService {
     // Save encrypted file
     await File(encryptedPath).writeAsBytes(encrypted.bytes);
 
+    // Generate and save thumbnail
+    Uint8List? thumbnailBytes;
+    if (type == MediaType.photo) {
+      thumbnailBytes = await _generateImageThumbnail(bytes);
+    } else if (type == MediaType.video) {
+      thumbnailBytes = await _generateVideoThumbnail(file);
+    }
+
+    if (thumbnailBytes != null) {
+      await _saveThumbnail(id, thumbnailBytes);
+    }
+
     // Save to database
     final mediaItem = MediaItem(
       id: id,
@@ -145,15 +160,172 @@ class StorageService {
     return Uint8List.fromList(decrypted);
   }
 
+  // Thumbnail size constant
+  static const int _thumbnailSize = 300;
+
+  // Get thumbnail filename from item id
+  String _getThumbnailFilename(String id) => '${id}_thumb.jpg.enc';
+
+  // Generate thumbnail from image bytes (runs in isolate for performance)
+  Future<Uint8List?> _generateImageThumbnail(Uint8List imageBytes) async {
+    try {
+      return await compute(_resizeImage, imageBytes);
+    } catch (e) {
+      debugPrint('Error generating thumbnail: $e');
+      return null;
+    }
+  }
+
+  // Static function for compute isolate
+  static Uint8List? _resizeImage(Uint8List bytes) {
+    try {
+      final image = img.decodeImage(bytes);
+      if (image == null) return null;
+
+      // Resize to thumbnail size (maintaining aspect ratio)
+      final thumbnail = img.copyResize(
+        image,
+        width: image.width > image.height ? _thumbnailSize : null,
+        height: image.height >= image.width ? _thumbnailSize : null,
+        interpolation: img.Interpolation.linear,
+      );
+
+      // Encode as JPEG with quality 85
+      return Uint8List.fromList(img.encodeJpg(thumbnail, quality: 85));
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Generate video thumbnail
+  Future<Uint8List?> _generateVideoThumbnail(File videoFile) async {
+    try {
+      final thumbnail = await VideoThumbnail.thumbnailData(
+        video: videoFile.path,
+        imageFormat: ImageFormat.JPEG,
+        maxWidth: _thumbnailSize,
+        quality: 85,
+      );
+      return thumbnail;
+    } catch (e) {
+      debugPrint('Error generating video thumbnail: $e');
+      return null;
+    }
+  }
+
+  // Save encrypted thumbnail
+  Future<String?> _saveThumbnail(String id, Uint8List thumbnailBytes) async {
+    try {
+      final vaultDir = await _getVaultDirectory();
+      final thumbnailFilename = _getThumbnailFilename(id);
+      final thumbnailPath = '${vaultDir.path}/$thumbnailFilename';
+
+      // Encrypt thumbnail
+      final encrypter = encrypt_lib.Encrypter(
+        encrypt_lib.AES(_encryptionKey!),
+      );
+      final encrypted = encrypter.encryptBytes(thumbnailBytes, iv: _iv!);
+
+      // Save encrypted thumbnail
+      await File(thumbnailPath).writeAsBytes(encrypted.bytes);
+
+      return thumbnailFilename;
+    } catch (e) {
+      debugPrint('Error saving thumbnail: $e');
+      return null;
+    }
+  }
+
+  // Get decrypted thumbnail bytes (returns null if no thumbnail exists)
+  Future<Uint8List?> getThumbnailBytes(MediaItem item) async {
+    final vaultDir = await _getVaultDirectory();
+    final thumbnailFilename = _getThumbnailFilename(item.id);
+    final thumbnailPath = '${vaultDir.path}/$thumbnailFilename';
+
+    final file = File(thumbnailPath);
+    if (!await file.exists()) {
+      return null;
+    }
+
+    try {
+      final encryptedBytes = await file.readAsBytes();
+      final encrypter = encrypt_lib.Encrypter(
+        encrypt_lib.AES(_encryptionKey!),
+      );
+      final encrypted = encrypt_lib.Encrypted(encryptedBytes);
+      final decrypted = encrypter.decryptBytes(encrypted, iv: _iv!);
+      return Uint8List.fromList(decrypted);
+    } catch (e) {
+      debugPrint('Error reading thumbnail: $e');
+      return null;
+    }
+  }
+
+  // Check if thumbnail exists for a media item
+  Future<bool> hasThumbnail(MediaItem item) async {
+    final vaultDir = await _getVaultDirectory();
+    final thumbnailPath = '${vaultDir.path}/${_getThumbnailFilename(item.id)}';
+    return await File(thumbnailPath).exists();
+  }
+
+  // Generate and save thumbnail for existing media item
+  Future<bool> generateThumbnailForItem(MediaItem item) async {
+    try {
+      // Check if thumbnail already exists
+      if (await hasThumbnail(item)) {
+        return true;
+      }
+
+      Uint8List? thumbnailBytes;
+
+      if (item.type == MediaType.photo) {
+        // For photos, decrypt and generate thumbnail
+        final bytes = await getMediaBytes(item);
+        thumbnailBytes = await _generateImageThumbnail(bytes);
+      } else if (item.type == MediaType.video) {
+        // For videos, need to decrypt to temp file first
+        final bytes = await getMediaBytes(item);
+        final tempDir = await getTemporaryDirectory();
+        final tempFile = File('${tempDir.path}/temp_${item.id}.mp4');
+        await tempFile.writeAsBytes(bytes);
+        thumbnailBytes = await _generateVideoThumbnail(tempFile);
+        await tempFile.delete();
+      } else if (item.type == MediaType.file && item.originalName != null) {
+        // For imported image files
+        final ext = item.originalName!.split('.').last.toLowerCase();
+        if (_isImageExtension(ext)) {
+          final bytes = await getMediaBytes(item);
+          thumbnailBytes = await _generateImageThumbnail(bytes);
+        }
+      }
+
+      if (thumbnailBytes != null) {
+        await _saveThumbnail(item.id, thumbnailBytes);
+        return true;
+      }
+      return false;
+    } catch (e) {
+      debugPrint('Error generating thumbnail for ${item.id}: $e');
+      return false;
+    }
+  }
+
   // Delete media item
   Future<void> deleteMedia(MediaItem item) async {
-    // Delete file
     final vaultDir = await _getVaultDirectory();
+
+    // Delete main file
     final filePath = '${vaultDir.path}/${item.filename}';
     final file = File(filePath);
-
     if (await file.exists()) {
       await file.delete();
+    }
+
+    // Delete thumbnail if exists
+    final thumbnailPath = '${vaultDir.path}/${_getThumbnailFilename(item.id)}';
+    final thumbnailFile = File(thumbnailPath);
+    if (await thumbnailFile.exists()) {
+      await thumbnailFile.delete();
     }
 
     // Delete from database
@@ -226,6 +398,16 @@ class StorageService {
     await File(encryptedPath).writeAsBytes(encrypted.bytes);
   }
 
+  // Check if extension is an image type
+  bool _isImageExtension(String ext) {
+    return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].contains(ext.toLowerCase());
+  }
+
+  // Check if extension is a video type
+  bool _isVideoExtension(String ext) {
+    return ['mp4', 'mov', 'avi', 'mkv', 'webm', '3gp'].contains(ext.toLowerCase());
+  }
+
   // Import file (encrypted)
   Future<MediaItem> importFile({
     required File file,
@@ -254,6 +436,20 @@ class StorageService {
     // Save encrypted file
     await File(encryptedPath).writeAsBytes(encrypted.bytes);
 
+    // Generate thumbnail for image files
+    if (_isImageExtension(ext)) {
+      final thumbnailBytes = await _generateImageThumbnail(bytes);
+      if (thumbnailBytes != null) {
+        await _saveThumbnail(id, thumbnailBytes);
+      }
+    } else if (_isVideoExtension(ext)) {
+      // For videos, generate thumbnail from the original file before deleting
+      final thumbnailBytes = await _generateVideoThumbnail(file);
+      if (thumbnailBytes != null) {
+        await _saveThumbnail(id, thumbnailBytes);
+      }
+    }
+
     // Delete original if requested (move mode)
     if (deleteOriginal) {
       try {
@@ -263,10 +459,18 @@ class StorageService {
       }
     }
 
+    // Determine media type - images should be photos, videos should be videos
+    MediaType mediaType = MediaType.file;
+    if (_isImageExtension(ext)) {
+      mediaType = MediaType.photo;
+    } else if (_isVideoExtension(ext)) {
+      mediaType = MediaType.video;
+    }
+
     // Save to database
     final mediaItem = MediaItem(
       id: id,
-      type: MediaType.file,
+      type: mediaType,
       filename: filename,
       originalName: originalName,
       createdAt: DateTime.now(),

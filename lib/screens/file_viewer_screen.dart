@@ -31,6 +31,9 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
   int _totalPages = 0;
   int _currentPage = 0;
 
+  // Image specific
+  File? _imageFile;
+
   @override
   void initState() {
     super.initState();
@@ -42,6 +45,8 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
 
     if (_isPdf) {
       await _loadPdf();
+    } else if (_isImage) {
+      await _loadImage();
     } else {
       setState(() {
         _isLoading = false;
@@ -52,6 +57,16 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
   bool get _isPdf {
     final name = widget.item.originalName?.toLowerCase() ?? '';
     return name.endsWith('.pdf');
+  }
+
+  bool get _isImage {
+    final name = widget.item.originalName?.toLowerCase() ?? '';
+    return name.endsWith('.jpg') ||
+        name.endsWith('.jpeg') ||
+        name.endsWith('.png') ||
+        name.endsWith('.gif') ||
+        name.endsWith('.webp') ||
+        name.endsWith('.bmp');
   }
 
   Future<void> _loadPdf() async {
@@ -74,10 +89,31 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
     }
   }
 
+  Future<void> _loadImage() async {
+    try {
+      // Decrypt to temp file
+      final bytes = await _storageService.getMediaBytes(widget.item);
+      final tempDir = await getTemporaryDirectory();
+      final ext = widget.item.originalName?.split('.').last ?? 'jpg';
+      _imageFile = File('${tempDir.path}/temp_${widget.item.id}.$ext');
+      await _imageFile!.writeAsBytes(bytes);
+
+      setState(() {
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+        _error = 'Failed to load image: $e';
+      });
+    }
+  }
+
   @override
   void dispose() {
-    // Clean up temp file
+    // Clean up temp files
     _tempFile?.delete().catchError((_) {});
+    _imageFile?.delete().catchError((_) {});
     super.dispose();
   }
 
@@ -238,7 +274,7 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(_isPdf ? fileName : 'File Details'),
+        title: Text((_isPdf || _isImage) ? fileName : 'File Details'),
         actions: [
           IconButton(
             icon: const Icon(Icons.file_download),
@@ -267,7 +303,9 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
                 )
               : _isPdf
                   ? _buildPdfViewer()
-                  : _buildFileInfo(fileName),
+                  : _isImage
+                      ? _buildImageViewer()
+                      : _buildFileInfo(fileName),
     );
   }
 
@@ -323,6 +361,23 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
             ),
           ),
       ],
+    );
+  }
+
+  Widget _buildImageViewer() {
+    if (_imageFile == null) {
+      return const Center(child: Text('Failed to load image'));
+    }
+
+    return Container(
+      color: Colors.black,
+      child: InteractiveViewer(
+        minScale: 1.0,
+        maxScale: 4.0,
+        child: Center(
+          child: Image.file(_imageFile!),
+        ),
+      ),
     );
   }
 
