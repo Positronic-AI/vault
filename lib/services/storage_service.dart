@@ -87,9 +87,11 @@ class StorageService {
   }
 
   // Save media file (encrypted)
+  // deviceOrientation: 0=portrait, 90=landscape left, 180=portrait down, 270=landscape right
   Future<MediaItem> saveMedia({
     required File file,
     required MediaType type,
+    int? deviceOrientation,
   }) async {
     final vaultDir = await _getVaultDirectory();
     final id = DateTime.now().millisecondsSinceEpoch.toString();
@@ -98,7 +100,22 @@ class StorageService {
     final encryptedPath = '${vaultDir.path}/$filename';
 
     // Read file
-    final bytes = await file.readAsBytes();
+    var bytes = await file.readAsBytes();
+
+    // For photos, fix orientation before storing
+    if (type == MediaType.photo) {
+      // First try EXIF-based orientation (for imported photos)
+      var orientedBytes = await _fixImageOrientation(bytes);
+
+      // If no EXIF rotation was applied and we have device orientation, rotate manually
+      if (orientedBytes == null && deviceOrientation != null && deviceOrientation != 0) {
+        orientedBytes = await _rotateByDeviceOrientation(bytes, deviceOrientation);
+      }
+
+      if (orientedBytes != null) {
+        bytes = orientedBytes;
+      }
+    }
 
     // Encrypt
     final encrypter = encrypt_lib.Encrypter(
@@ -179,20 +196,93 @@ class StorageService {
   // Static function for compute isolate
   static Uint8List? _resizeImage(Uint8List bytes) {
     try {
-      final image = img.decodeImage(bytes);
+      // Try JPEG decoder first (better EXIF support)
+      img.Image? image = img.decodeJpg(bytes);
+      image ??= img.decodeImage(bytes);
       if (image == null) return null;
+
+      // Apply EXIF orientation before resizing
+      final oriented = img.bakeOrientation(image);
 
       // Resize to thumbnail size (maintaining aspect ratio)
       final thumbnail = img.copyResize(
-        image,
-        width: image.width > image.height ? _thumbnailSize : null,
-        height: image.height >= image.width ? _thumbnailSize : null,
+        oriented,
+        width: oriented.width > oriented.height ? _thumbnailSize : null,
+        height: oriented.height >= oriented.width ? _thumbnailSize : null,
         interpolation: img.Interpolation.linear,
       );
 
       // Encode as JPEG with quality 85
       return Uint8List.fromList(img.encodeJpg(thumbnail, quality: 85));
     } catch (e) {
+      return null;
+    }
+  }
+
+  // Rotate image based on device orientation from accelerometer
+  // deviceOrientation: 0=portrait, 90=landscape left, 180=portrait down, 270=landscape right
+  Future<Uint8List?> _rotateByDeviceOrientation(Uint8List imageBytes, int deviceOrientation) async {
+    try {
+      img.Image? image = img.decodeJpg(imageBytes);
+      image ??= img.decodeImage(imageBytes);
+      if (image == null) return null;
+
+      // Camera outputs portrait (720x1280) regardless of phone orientation.
+      // We need to rotate based on how the phone was held:
+      // - Portrait (0°): No rotation needed - already portrait
+      // - Landscape left (90°): Rotate 270° CW (90° CCW) to get landscape right-side up
+      // - Portrait down (180°): Rotate 180° for upside down
+      // - Landscape right (270°): Rotate 90° CW to get landscape right-side up
+      int rotationAngle;
+      switch (deviceOrientation) {
+        case 90:  // Landscape left - phone rotated CCW
+          rotationAngle = 270;
+          break;
+        case 180: // Portrait down - upside down
+          rotationAngle = 180;
+          break;
+        case 270: // Landscape right - phone rotated CW
+          rotationAngle = 90;
+          break;
+        default:  // 0 = Portrait up - no rotation needed
+          rotationAngle = 0;
+      }
+
+      if (rotationAngle == 0) return null; // No rotation needed
+
+      final rotated = img.copyRotate(image, angle: rotationAngle);
+      return Uint8List.fromList(img.encodeJpg(rotated, quality: 95));
+    } catch (e) {
+      debugPrint('Error rotating by device orientation: $e');
+      return null;
+    }
+  }
+
+  // Fix image orientation based on EXIF data
+  Future<Uint8List?> _fixImageOrientation(Uint8List imageBytes) async {
+    try {
+      // Run directly (not in isolate) to ensure it works
+      img.Image? image = img.decodeJpg(imageBytes);
+      image ??= img.decodeImage(imageBytes);
+      if (image == null) return null;
+
+      // Apply EXIF orientation - rotates pixels based on EXIF tag
+      final oriented = img.bakeOrientation(image);
+
+      // If dimensions changed, rotation was applied - return new bytes
+      if (oriented.width != image.width || oriented.height != image.height) {
+        return Uint8List.fromList(img.encodeJpg(oriented, quality: 95));
+      }
+
+      // Check for 180° rotation (dimensions same but pixels flipped)
+      final orientation = image.exif.exifIfd.orientation ?? 1;
+      if (orientation == 2 || orientation == 3 || orientation == 4) {
+        return Uint8List.fromList(img.encodeJpg(oriented, quality: 95));
+      }
+
+      return null; // No rotation needed
+    } catch (e) {
+      debugPrint('Error fixing orientation: $e');
       return null;
     }
   }
@@ -425,7 +515,15 @@ class StorageService {
     final encryptedPath = '${vaultDir.path}/$filename';
 
     // Read file
-    final bytes = await file.readAsBytes();
+    var bytes = await file.readAsBytes();
+
+    // For images, fix EXIF orientation before storing
+    if (_isImageExtension(ext)) {
+      final orientedBytes = await _fixImageOrientation(bytes);
+      if (orientedBytes != null) {
+        bytes = orientedBytes;
+      }
+    }
 
     // Encrypt
     final encrypter = encrypt_lib.Encrypter(

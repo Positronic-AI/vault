@@ -1,5 +1,8 @@
 import 'dart:io';
+import 'dart:ui' as ui;
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
 import '../services/storage_service.dart';
@@ -33,10 +36,22 @@ class _MediaViewerScreenState extends State<MediaViewerScreen> {
     _currentIndex = widget.initialIndex;
     _pageController = PageController(initialPage: widget.initialIndex);
     _storageService.initialize();
+
+    // Allow all rotations in media viewer
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
   }
 
   @override
   void dispose() {
+    // Restore portrait-only when leaving
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+    ]);
     _pageController.dispose();
     super.dispose();
   }
@@ -109,47 +124,73 @@ class _MediaViewerScreenState extends State<MediaViewerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final statusBarHeight = MediaQuery.of(context).padding.top;
+
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        title: Text('${_currentIndex + 1} / ${widget.allMedia.length}'),
-        actions: [
-          IconButton(
-            icon: _isExporting
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.white,
-                    ),
-                  )
-                : const Icon(Icons.file_download),
-            onPressed: _isExporting ? null : _handleExport,
-            tooltip: 'Export to Downloads',
+      body: Stack(
+        children: [
+          // Main content - PageView (full screen)
+          PageView.builder(
+            controller: _pageController,
+            itemCount: widget.allMedia.length,
+            onPageChanged: (index) {
+              setState(() {
+                _currentIndex = index;
+              });
+            },
+            itemBuilder: (context, index) {
+              return MediaPage(
+                mediaItem: widget.allMedia[index],
+                key: ValueKey(widget.allMedia[index].id),
+              );
+            },
           ),
-          IconButton(
-            icon: const Icon(Icons.delete),
-            onPressed: _handleDelete,
-            tooltip: 'Delete',
+          // Custom transparent overlay controls
+          Positioned(
+            top: statusBarHeight,
+            left: 0,
+            right: 0,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+              color: Colors.black.withOpacity(0.2),
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back, color: Colors.white),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                  Expanded(
+                    child: Text(
+                      '${_currentIndex + 1} / ${widget.allMedia.length}',
+                      style: const TextStyle(color: Colors.white, fontSize: 18),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                  IconButton(
+                    icon: _isExporting
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(Icons.file_download, color: Colors.white),
+                    onPressed: _isExporting ? null : _handleExport,
+                    tooltip: 'Export to Downloads',
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.delete, color: Colors.white),
+                    onPressed: _handleDelete,
+                    tooltip: 'Delete',
+                  ),
+                ],
+              ),
+            ),
           ),
         ],
-      ),
-      body: PageView.builder(
-        controller: _pageController,
-        itemCount: widget.allMedia.length,
-        onPageChanged: (index) {
-          setState(() {
-            _currentIndex = index;
-          });
-        },
-        itemBuilder: (context, index) {
-          return MediaPage(
-            mediaItem: widget.allMedia[index],
-            key: ValueKey(widget.allMedia[index].id),
-          );
-        },
       ),
     );
   }
@@ -173,6 +214,12 @@ class _MediaPageState extends State<MediaPage> with AutomaticKeepAliveClientMixi
   File? _decryptedFile;
   VideoPlayerController? _videoController;
 
+  // Diagnostic info
+  int _imageWidth = 0;
+  int _imageHeight = 0;
+  int _fileSize = 0;
+  String _orientation = 'unknown';
+
   @override
   bool get wantKeepAlive => true;
 
@@ -187,6 +234,7 @@ class _MediaPageState extends State<MediaPage> with AutomaticKeepAliveClientMixi
 
     try {
       final bytes = await _storageService.getMediaBytes(widget.mediaItem);
+      _fileSize = bytes.length;
 
       // Save to temporary file for viewing
       final tempDir = await getTemporaryDirectory();
@@ -195,11 +243,23 @@ class _MediaPageState extends State<MediaPage> with AutomaticKeepAliveClientMixi
 
       await tempFile.writeAsBytes(bytes);
 
+      // Get image dimensions for diagnostics
+      if (widget.mediaItem.type == MediaType.photo) {
+        final dims = await _getImageDimensions(bytes);
+        _imageWidth = dims['width'] ?? 0;
+        _imageHeight = dims['height'] ?? 0;
+        _orientation = _imageWidth > _imageHeight ? 'LANDSCAPE' :
+                       _imageWidth < _imageHeight ? 'PORTRAIT' : 'SQUARE';
+      }
+
       // Initialize video controller for videos
       if (widget.mediaItem.type == MediaType.video) {
         _videoController = VideoPlayerController.file(tempFile);
         await _videoController!.initialize();
         await _videoController!.setLooping(true);
+        _imageWidth = _videoController!.value.size.width.toInt();
+        _imageHeight = _videoController!.value.size.height.toInt();
+        _orientation = _imageWidth > _imageHeight ? 'LANDSCAPE' : 'PORTRAIT';
       }
 
       if (mounted) {
@@ -216,6 +276,45 @@ class _MediaPageState extends State<MediaPage> with AutomaticKeepAliveClientMixi
         });
       }
     }
+  }
+
+  Future<Map<String, int>> _getImageDimensions(Uint8List bytes) async {
+    try {
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      return {
+        'width': frame.image.width,
+        'height': frame.image.height,
+      };
+    } catch (e) {
+      return {'width': 0, 'height': 0};
+    }
+  }
+
+  Widget _buildDiagnosticOverlay() {
+    final screenOrientation = MediaQuery.of(context).orientation;
+    return Positioned(
+      bottom: 20,
+      left: 10,
+      right: 10,
+      child: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: Colors.black.withOpacity(0.7),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text(
+          'STORED: ${_imageWidth}x$_imageHeight ($_orientation)\n'
+          'FILE: ${(_fileSize / 1024).toStringAsFixed(0)} KB\n'
+          'SCREEN: $screenOrientation',
+          style: const TextStyle(
+            color: Colors.greenAccent,
+            fontSize: 12,
+            fontFamily: 'monospace',
+          ),
+        ),
+      ),
+    );
   }
 
   double _getDisplayAspectRatio() {
@@ -246,47 +345,66 @@ class _MediaPageState extends State<MediaPage> with AutomaticKeepAliveClientMixi
   Widget build(BuildContext context) {
     super.build(context); // Required for AutomaticKeepAliveClientMixin
 
-    return _isLoading
-        ? const Center(child: CircularProgressIndicator())
-        : _decryptedFile == null
-            ? const Center(child: Text('Error loading media', style: TextStyle(color: Colors.white)))
-            : Center(
-                child: widget.mediaItem.type == MediaType.photo
-                    ? InteractiveViewer(
-                        minScale: 1.0,
-                        maxScale: 4.0,
-                        child: Image.file(_decryptedFile!),
-                      )
-                    : _videoController != null && _videoController!.value.isInitialized
-                        ? GestureDetector(
-                            onTap: () {
-                              setState(() {
-                                if (_videoController!.value.isPlaying) {
-                                  _videoController!.pause();
-                                } else {
-                                  _videoController!.play();
-                                }
-                              });
-                            },
-                            child: Stack(
-                              alignment: Alignment.center,
-                              children: [
-                                Center(
-                                  child: AspectRatio(
-                                    aspectRatio: _getDisplayAspectRatio(),
-                                    child: VideoPlayer(_videoController!),
-                                  ),
-                                ),
-                                if (!_videoController!.value.isPlaying)
-                                  const Icon(
-                                    Icons.play_circle_outline,
-                                    size: 80,
-                                    color: Colors.white,
-                                  ),
-                              ],
-                            ),
-                          )
-                        : const Center(child: Text('Error loading video', style: TextStyle(color: Colors.white))),
-              );
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_decryptedFile == null) {
+      return const Center(
+        child: Text('Error loading media', style: TextStyle(color: Colors.white)),
+      );
+    }
+
+    // Photo display
+    if (widget.mediaItem.type == MediaType.photo) {
+      return SizedBox.expand(
+        child: InteractiveViewer(
+          minScale: 0.5,
+          maxScale: 4.0,
+          child: Center(
+            child: Image.file(
+              _decryptedFile!,
+              fit: BoxFit.contain,
+            ),
+          ),
+        ),
+      );
+    }
+
+    // Video display
+    if (_videoController != null && _videoController!.value.isInitialized) {
+      return GestureDetector(
+        onTap: () {
+          setState(() {
+            if (_videoController!.value.isPlaying) {
+              _videoController!.pause();
+            } else {
+              _videoController!.play();
+            }
+          });
+        },
+        child: Center(
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              AspectRatio(
+                aspectRatio: _getDisplayAspectRatio(),
+                child: VideoPlayer(_videoController!),
+              ),
+              if (!_videoController!.value.isPlaying)
+                const Icon(
+                  Icons.play_circle_outline,
+                  size: 80,
+                  color: Colors.white,
+                ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return const Center(
+      child: Text('Error loading video', style: TextStyle(color: Colors.white)),
+    );
   }
 }

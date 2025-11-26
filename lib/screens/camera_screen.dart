@@ -163,10 +163,11 @@ class _CameraScreenState extends State<CameraScreen>
       final image = await _controller!.takePicture();
       final file = File(image.path);
 
-      // Save encrypted
+      // Save encrypted with device orientation for proper rotation
       await _storageService.saveMedia(
         file: file,
         type: MediaType.photo,
+        deviceOrientation: _deviceOrientation,
       );
 
       // Delete temp file
@@ -274,7 +275,10 @@ class _CameraScreenState extends State<CameraScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
+        backgroundColor: Colors.black.withOpacity(0.2),
+        elevation: 0,
         title: const Text('Camera'),
         actions: [
           if (_cameras != null && _cameras!.length > 1)
@@ -360,6 +364,27 @@ class _CameraScreenState extends State<CameraScreen>
                     ),
                   ),
                 ),
+
+                // Orientation diagnostic overlay (commented out - for debugging)
+                // Positioned(
+                //   top: 80,
+                //   left: 10,
+                //   child: Container(
+                //     padding: const EdgeInsets.all(8),
+                //     decoration: BoxDecoration(
+                //       color: Colors.black.withOpacity(0.7),
+                //       borderRadius: BorderRadius.circular(8),
+                //     ),
+                //     child: Text(
+                //       'ORIENTATION: $_deviceOrientation°\n$_orientationString',
+                //       style: const TextStyle(
+                //         color: Colors.greenAccent,
+                //         fontSize: 12,
+                //         fontFamily: 'monospace',
+                //       ),
+                //     ),
+                //   ),
+                // ),
 
                 // Controls
                 Positioned(
