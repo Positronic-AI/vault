@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../services/security_service.dart';
 import '../services/storage_service.dart';
 
@@ -134,10 +135,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 // About Section
                 _buildSectionHeader('About Vault'),
 
-                const ListTile(
-                  leading: Icon(Icons.lock_open),
-                  title: Text('Open Source'),
-                  subtitle: Text('Fully open source and auditable'),
+                ListTile(
+                  leading: const Icon(Icons.code),
+                  title: const Text('Open Source'),
+                  subtitle: const Text('View source code on GitHub'),
+                  trailing: const Icon(Icons.open_in_new, size: 18),
+                  onTap: () => _launchUrl('https://github.com/Positronic-AI/vault'),
                 ),
 
                 const ListTile(
@@ -217,5 +220,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
         color: isWarning ? Colors.orange : Colors.green,
       ),
     );
+  }
+
+  Future<void> _launchUrl(String url) async {
+    final uri = Uri.parse(url);
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (e) {
+      // Silently fail if unable to launch
+    }
   }
 }
